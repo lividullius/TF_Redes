@@ -6,7 +6,18 @@ roteador de estado de enlace sobre UDP, em Python 3 (apenas biblioteca padrão).
 
 ```sh
 python3 roteador.py configs/teste5/r1.conf [--seq-inicial N] [--descartar-lsp N]
+sh scripts/iniciar_teste5.sh          # abre os 5 roteadores (macOS)
+python3 -m unittest discover tests    # testes unitários
 ```
+
+Comandos: `tabela`, `lsdb`, `vizinhos`, `msg <destino> <texto>`, `ping <destino> [TTL]`,
+`dijkstra`, `stats`, `ajuda`, `sair`.
+
+Opções de experimento (relatório): `--seq-inicial N` fixa o primeiro número de
+sequência (questão 4); `--descartar-lsp N` descarta de propósito o N-ésimo LSP
+novo recebido (questão 5).
+
+Logs: `logs/roteador-<endereço>.log` (HELLOs só aparecem no arquivo).
 
 ## Estrutura
 

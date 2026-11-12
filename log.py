@@ -19,16 +19,43 @@ HELLO enviado/recebido: apenas no arquivo (terminal=False).
 
 from __future__ import annotations
 
+import os
+import threading
+import time
+from typing import Optional, TextIO
+
+_lock = threading.Lock()
+_arquivo: Optional[TextIO] = None
+
 
 def iniciar(endereco: str, diretorio: str = "logs") -> None:
-    """Abre o arquivo roteador-<endereço>.log."""
-    raise NotImplementedError
+    """Abre o arquivo roteador-<endereço>.log (acrescenta ao final)."""
+    global _arquivo
+    os.makedirs(diretorio, exist_ok=True)
+    caminho = os.path.join(diretorio, f"roteador-{endereco}.log")
+    _arquivo = open(caminho, "a", encoding="utf-8", buffering=1)
+
+
+def horario() -> str:
+    """Horário local com milissegundos: HH:MM:SS.mmm."""
+    agora = time.time()
+    ms = int((agora % 1) * 1000)
+    return time.strftime("%H:%M:%S", time.localtime(agora)) + f".{ms:03d}"
 
 
 def evento(texto: str, terminal: bool = True) -> None:
     """Grava uma linha com horário em ms; thread-safe."""
-    raise NotImplementedError
+    linha = f"{horario()} {texto}"
+    with _lock:
+        if _arquivo is not None:
+            _arquivo.write(linha + "\n")
+        if terminal:
+            print(linha, flush=True)
 
 
 def encerrar() -> None:
-    raise NotImplementedError
+    global _arquivo
+    with _lock:
+        if _arquivo is not None:
+            _arquivo.close()
+            _arquivo = None

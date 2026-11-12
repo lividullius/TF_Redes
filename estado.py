@@ -51,6 +51,7 @@ class PingPendente:
     destino: str
     evento: threading.Event = field(default_factory=threading.Event)
     resposta: Optional[object] = None       # pacote ICMP recebido (pacotes.ICMP)
+    recebido_em: Optional[float] = None     # time.monotonic() da resposta
 
 
 @dataclass
@@ -74,12 +75,17 @@ class Estado:
     tabela: dict[str, Rota] = field(default_factory=dict)
     pings_pendentes: dict[int, PingPendente] = field(default_factory=dict)
 
-    seq_proprio: int = 0
+    seq_proprio: int = 0                    # último seq usado; o próximo LSP usa +1
     prox_id: int = 1
     contadores: Contadores = field(default_factory=Contadores)
 
+    # Próximos disparos da thread temporizadora (time.monotonic()).
+    proximo_hello: float = 0.0
+    proxima_renovacao: float = 0.0
+
     # Opções de experimento (relatório, questões 4 e 5); desligadas por padrão.
-    descartar_lsp: int = 0                  # --descartar-lsp N
+    descartar_lsp: int = 0                  # --descartar-lsp N: descarta o N-ésimo LSP novo
+    lsps_novos_recebidos: int = 0           # contagem usada por --descartar-lsp
 
     # Socket UDP único (envia e recebe); preenchido por roteador.py.
     sock: Optional[object] = None
