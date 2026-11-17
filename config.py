@@ -56,6 +56,7 @@ def analisar_linhas(linhas: list[str], nome: str = "configuração") -> Configur
     vistos: set[tuple[str, int]] = set()
 
     for numero, linha in enumerate(linhas, start=1):
+        # remove comentários, inclusive no fim da linha
         linha = linha.split("#", 1)[0].strip()
         if not linha:
             continue
@@ -87,6 +88,7 @@ def analisar_linhas(linhas: list[str], nome: str = "configuração") -> Configur
             ip = _ip(args[0], onde)
             porta_viz = _porta(args[1], onde)
             custo = _custo(args[2], onde)
+            # o par (ip, porta) identifica o vizinho na recepção
             if (ip, porta_viz) in vistos:
                 raise ErroConfiguracao(
                     f"{onde}: vizinho {ip}:{porta_viz} repetido")
@@ -124,6 +126,7 @@ def _custo(texto: str, onde: str) -> int:
 
 
 def _ip(texto: str, onde: str) -> str:
+    # só IP numérico, para bater com o endereço devolvido pelo recvfrom
     try:
         return str(ipaddress.IPv4Address(texto))
     except ValueError:

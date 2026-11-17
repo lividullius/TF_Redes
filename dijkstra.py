@@ -59,14 +59,16 @@ def calcular_tabela(
     primeiro_salto: dict[str, Optional[str]] = {no: None for no in grafo}
     finalizados: set[str] = set()
 
+    # heap de (distância, nó): heappop devolve a menor distância
     fila: list[tuple[float, str]] = [(0, eu)]
     iteracao = 0
 
     while fila:
         # Passo 3: nó de menor distância ainda não finalizado.
         dist_u, u = heapq.heappop(fila)
+        # entrada antiga de um nó já finalizado: ignora
         if u in finalizados:
-            continue  # entrada antiga na fila (já achamos caminho melhor)
+            continue
         finalizados.add(u)
         iteracao += 1
 
@@ -78,6 +80,7 @@ def calcular_tabela(
             if nova < distancia[v]:
                 distancia[v] = nova
                 predecessor[v] = u
+                # vizinho direto é o próprio primeiro salto; senão herda o de u
                 primeiro_salto[v] = v if u == eu else primeiro_salto[u]
                 heapq.heappush(fila, (nova, v))
 
@@ -91,6 +94,7 @@ def calcular_tabela(
             })
 
     # Passo 5: uma linha por roteador alcançável, fora a minha rede.
+    # chave é a rede (10.G.R), então qualquer 10.G.R.x usa a rota
     minha_rede = rede_de(eu)
     tabela: dict[str, tuple[str, int]] = {}
     for no in finalizados:

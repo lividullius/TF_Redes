@@ -24,6 +24,7 @@ import threading
 import time
 from typing import Optional, TextIO
 
+# evita linhas misturadas quando várias threads escrevem ao mesmo tempo
 _lock = threading.Lock()
 _arquivo: Optional[TextIO] = None
 
@@ -33,11 +34,13 @@ def iniciar(endereco: str, diretorio: str = "logs") -> None:
     global _arquivo
     os.makedirs(diretorio, exist_ok=True)
     caminho = os.path.join(diretorio, f"roteador-{endereco}.log")
+    # "a": acrescenta ao arquivo; buffering=1: grava linha a linha
     _arquivo = open(caminho, "a", encoding="utf-8", buffering=1)
 
 
 def horario() -> str:
     """Horário local com milissegundos: HH:MM:SS.mmm."""
+    # hora real com ms, para medir a convergência
     agora = time.time()
     ms = int((agora % 1) * 1000)
     return time.strftime("%H:%M:%S", time.localtime(agora)) + f".{ms:03d}"

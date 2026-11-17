@@ -62,6 +62,7 @@ def cmd_ajuda(estado: Estado, resto: str) -> None:
 
 
 def cmd_tabela(estado: Estado, resto: str) -> None:
+    # copia sob o lock e imprime fora dele
     with estado.lock:
         linhas = sorted(estado.tabela.items(), key=lambda kv: _chave_endereco(kv[0]))
     if not linhas:
@@ -130,8 +131,9 @@ def cmd_ping(estado: Estado, resto: str) -> None:
         ttl = int(partes[1])
 
     with estado.lock:
-        id_ = estado.prox_id
+        id_ = estado.prox_id  # id liga a resposta ao pedido
         estado.prox_id += 1
+        # registra antes de enviar: a resposta pode chegar muito rápido
         pendente = PingPendente(enviado_em=time.monotonic(), destino=destino)
         estado.pings_pendentes[id_] = pendente
         pedido = pacotes.ICMP(estado.meu_endereco, destino, ttl, id_,
@@ -143,7 +145,8 @@ def cmd_ping(estado: Estado, resto: str) -> None:
         print(f"Destino inalcançável: sem rota para {destino}.")
         return
 
-    pendente.evento.wait(TIMEOUT_PING)  # fora do lock
+    # espera fora do lock, senão a receptora não processa a resposta
+    pendente.evento.wait(TIMEOUT_PING)
 
     with estado.lock:
         estado.pings_pendentes.pop(id_, None)
@@ -151,6 +154,7 @@ def cmd_ping(estado: Estado, resto: str) -> None:
     if resposta is None:
         print(f"ping {destino} id={id_} ttl={ttl}: timeout após {TIMEOUT_PING:.0f} s")
         return
+    # RTT em ms
     rtt = (recebido_em - pendente.enviado_em) * 1000
     descricao = {
         pacotes.ICMP_ECO_RESPOSTA: "resposta de eco",

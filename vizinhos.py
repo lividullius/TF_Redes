@@ -52,17 +52,21 @@ def receber_hello(estado: Estado, hello: pacotes.Hello, origem_real: ParReal) ->
             log.evento(f"HELLO IGNORADO: {par_txt} anuncia o meu próprio endereço")
             return
 
+        # Regra 2: todo HELLO renova o prazo de 20 s do vizinho.
         viz.ultimo_hello = time.monotonic()
 
         if not viz.ativo:
+            # Regra 3: vizinho ficou ativo; associa endereço virtual ao par (ip, porta)
             viz.ativo = True
             viz.endereco_virtual = hello.endereco
             estado.virt_para_real[hello.endereco] = origem_real
             log.evento(f"VIZINHO ATIVO {hello.endereco} ({par_txt})")
             lsdb.gerar_lsp_proprio(estado, "vizinho ativo")
+            # envia a LSDB inteira, pois o vizinho pode ter acabado de ligar
             lsdb.sincronizar_vizinho(estado, origem_real)
 
         elif viz.endereco_virtual != hello.endereco:
+            # Regra 4: o mesmo par (ip, porta) mudou de endereço virtual
             antigo = viz.endereco_virtual
             if estado.virt_para_real.get(antigo) == origem_real:
                 del estado.virt_para_real[antigo]
@@ -75,9 +79,11 @@ def receber_hello(estado: Estado, hello: pacotes.Hello, origem_real: ParReal) ->
 def verificar_inatividade(estado: Estado, agora: float) -> None:
     """Aplica a regra 5."""
     with estado.lock:
+        # um único LSP no final, mesmo se vários vizinhos caírem juntos
         mudou = False
         for par, viz in estado.vizinhos.items():
             if viz.ativo and agora - viz.ultimo_hello > LIMITE_INATIVIDADE:
+                # sem associação, rotas por este vizinho viram "sem rota"
                 viz.ativo = False
                 if estado.virt_para_real.get(viz.endereco_virtual) == par:
                     del estado.virt_para_real[viz.endereco_virtual]
@@ -101,6 +107,7 @@ def pares_ativos(estado: Estado) -> list[ParReal]:
 
 def enviar_para_par(estado: Estado, dados: bytes, par: ParReal) -> None:
     """Envia pelo socket único. Erros de envio só vão para o log."""
+    # UDP não confirma entrega; só erros locais caem aqui
     try:
         estado.sock.sendto(dados, par)
     except OSError as e:

@@ -67,6 +67,7 @@ class Contadores:
 class Estado:
     meu_endereco: str                       # 10.G.R.1
     porta: int
+    # RLock: a mesma thread pode pegar o lock de novo (funções com lock chamam outras)
     lock: threading.RLock = field(default_factory=threading.RLock)
 
     vizinhos: dict[ParReal, Vizinho] = field(default_factory=dict)

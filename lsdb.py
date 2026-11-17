@@ -39,7 +39,8 @@ def formatar_vizinhos(viz: dict[str, int]) -> str:
 def gerar_lsp_proprio(estado: Estado, motivo: str) -> None:
     with estado.lock:
         agora = time.monotonic()
-        estado.seq_proprio += 1
+        estado.seq_proprio += 1  # seq maior indica LSP mais novo
+        # só vizinhos ativos entram no LSP
         viz = vizinhos.vizinhos_ativos(estado)
         dados = pacotes.montar_lsp(estado.meu_endereco, estado.seq_proprio, viz)
         estado.lsdb[estado.meu_endereco] = EntradaLSDB(
@@ -49,6 +50,7 @@ def gerar_lsp_proprio(estado: Estado, motivo: str) -> None:
             texto_original=dados.decode("ascii"),
         )
         estado.contadores.lsp_gerados += 1
+        # qualquer LSP gerado reinicia o prazo de 30 s
         estado.proxima_renovacao = agora + INTERVALO_RENOVACAO
         log.evento(f"LSP GERADO seq={estado.seq_proprio} "
                    f"vizinhos={formatar_vizinhos(viz)} ({motivo})")
@@ -63,12 +65,12 @@ def receber_lsp(estado: Estado, lsp: pacotes.LSP, origem_real: ParReal) -> None:
         via = estado.vizinhos[origem_real].endereco_virtual or \
             f"{origem_real[0]}:{origem_real[1]}"
 
-        # Regra 1: o meu próprio LSP voltando pela inundação.
+        # Regra 1: meu próprio LSP voltando pela inundação
         if lsp.origem == estado.meu_endereco:
             log.evento(f"LSP PROPRIO DESCARTADO seq={lsp.seq} via={via}", terminal=False)
             return
 
-        # Regra 2: cópia ou LSP antigo.
+        # Regra 2: cópia ou LSP antigo; é o que faz a inundação terminar
         atual = estado.lsdb.get(lsp.origem)
         if atual is not None and atual.seq >= lsp.seq:
             estado.contadores.lsp_copias_descartadas += 1
@@ -93,6 +95,7 @@ def receber_lsp(estado: Estado, lsp: pacotes.LSP, origem_real: ParReal) -> None:
         estado.contadores.lsp_aceitos += 1
         log.evento(f"LSP NOVO origem={lsp.origem} seq={lsp.seq} via={via} "
                    f"vizinhos={formatar_vizinhos(lsp.vizinhos)}")
+        # repassa a todos os ativos, menos a quem nos mandou
         inundar(estado, lsp.texto_original, exceto=origem_real)
         recalcular_tabela(estado, f"LSP novo de {lsp.origem}")
 
@@ -123,6 +126,7 @@ def renovar_se_preciso(estado: Estado, agora: float) -> None:
 
 def envelhecer(estado: Estado, agora: float) -> None:
     with estado.lock:
+        # o LSP próprio não envelhece; monta a lista antes de remover do dict
         velhos = [origem for origem, e in estado.lsdb.items()
                   if origem != estado.meu_endereco
                   and agora - e.recebido_em > IDADE_MAXIMA]

@@ -80,14 +80,18 @@ Pacote = Union[Hello, LSP, Dados, ICMP]
 def analisar(dados: bytes) -> Pacote:
     """Decodifica e valida um datagrama. Retorna Hello | LSP | Dados | ICMP.
     Lança PacoteMalformado em qualquer falha."""
+    # ASCII estrito: acentos ou bytes binários descartam o pacote
     try:
         texto = dados.decode("ascii")
     except UnicodeDecodeError:
         raise PacoteMalformado("bytes fora do ASCII")
 
+    # aceita \n ou \r\n no fim (tolerância ao receber)
     texto = texto.rstrip("\r\n")
     campos = texto.split(":")
     tipo = campos[0]
+
+    # cada tipo confere o número exato de campos
 
     if tipo == "HELLO":
         return _analisar_hello(campos)
@@ -110,18 +114,21 @@ def _analisar_lsp(campos: list[str], texto: str) -> LSP:
     origem = _endereco(campos[1], "origem")
     seq = _inteiro(campos[2], "sequência")
     vizinhos: dict[str, int] = {}
+    # ignora itens vazios: lista vazia ou ';' sobrando no fim
     for item in campos[3].split(";"):
         if item == "":
-            continue  # lista vazia ou ';' sobrando
+            continue
         partes = item.split("=")
         if len(partes) != 2:
             raise PacoteMalformado(f"item de LSP inválido {item[:30]!r}")
         vizinho = _endereco(partes[0], "vizinho do LSP")
         vizinhos[vizinho] = _inteiro(partes[1], "custo", minimo=1)
+    # texto original, reenviado sem alteração na inundação
     return LSP(origem, seq, vizinhos, texto)
 
 
 def _analisar_dados(campos: list[str]) -> Dados:
+    # ':' na mensagem gera mais de 6 campos e o pacote é rejeitado
     _exigir_campos(campos, 6)
     return Dados(
         origem=_endereco(campos[1], "origem"),
@@ -159,6 +166,7 @@ def _endereco(texto: str, nome: str) -> str:
 
 
 def _inteiro(texto: str, nome: str, minimo: int = 0) -> int:
+    # isdigit() rejeita " 5", "+5" e "-5", que int() aceitaria
     if not (texto.isascii() and texto.isdigit()) or int(texto) < minimo:
         raise PacoteMalformado(f"{nome} inválido {texto[:30]!r}")
     return int(texto)
@@ -173,11 +181,14 @@ def endereco_valido(endereco: str) -> bool:
 
 # ---------- envio ----------
 
+# Montagem: formato exato, em ASCII, sem quebra de linha.
+
 def montar_hello(endereco: str) -> bytes:
     return f"HELLO:{endereco}".encode("ascii")
 
 
 def montar_lsp(origem: str, seq: int, vizinhos: dict[str, int]) -> bytes:
+    # ordenado para o texto sair sempre igual
     lista = ";".join(f"{v}={c}" for v, c in sorted(vizinhos.items()))
     return f"LSP:{origem}:{seq}:{lista}".encode("ascii")
 
