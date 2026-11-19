@@ -4,6 +4,8 @@ roteador de estado de enlace sobre UDP, em Python 3 (apenas biblioteca padrão).
 
 ## Execução
 
+Para rodar em dois PCs conectados no mesmo access point, veja [COMO_RODAR.md](COMO_RODAR.md).
+
 ```sh
 python3 roteador.py configs/teste5/r1.conf [--seq-inicial N] [--descartar-lsp N]
 sh scripts/iniciar_teste5.sh          # abre os 5 roteadores (macOS)
@@ -35,6 +37,7 @@ log.py             log com horário em ms (terminal + roteador-<endereço>.log)
 
 configs/teste5/        5 roteadores em 127.0.0.1:6001-6005 (topologia de teste)
 configs/apresentacao4/ 4 roteadores da apresentação (trocar IPs reais)
+configs/dois_pcs/      2 roteadores em 2 PCs (ver COMO_RODAR.md)
 tests/                 testes unitários (python3 -m unittest discover tests)
 scripts/               envio de pacotes arbitrários e inicialização da topologia
 relatorio/             relatório e capturas .pcapng
