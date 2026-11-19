@@ -127,7 +127,7 @@ def encaminhar(estado: Estado, pacote: PacoteRoteavel) -> None:
             gerar_erro_icmp(estado, pacote, pacotes.ICMP_INALCANCAVEL)
             return
 
-        # 3. Encaminhado.
+        # 3. Encaminhado
         log.evento(f"ENCAMINHADO {desc} prox={rota.proximo_salto} ttl={novo_ttl}")
 
 

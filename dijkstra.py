@@ -52,7 +52,7 @@ def calcular_tabela(
     grafo = montar_grafo(lsdb)
     grafo.setdefault(eu, {})
 
-    # Passo 2: distância 0 para mim, infinito para os demais.
+    # Passo 2: distância 0 para mim, infinito para os demais
     distancia: dict[str, float] = {no: INFINITO for no in grafo}
     distancia[eu] = 0
     predecessor: dict[str, Optional[str]] = {no: None for no in grafo}
@@ -64,7 +64,7 @@ def calcular_tabela(
     iteracao = 0
 
     while fila:
-        # Passo 3: nó de menor distância ainda não finalizado.
+        # Passo 3: nó de menor distância ainda não finalizado
         dist_u, u = heapq.heappop(fila)
         # entrada antiga de um nó já finalizado: ignora
         if u in finalizados:
@@ -72,7 +72,7 @@ def calcular_tabela(
         finalizados.add(u)
         iteracao += 1
 
-        # Passo 4: relaxar as arestas que saem de u.
+        # Passo 4: relaxar as arestas que saem de u
         for v, custo in grafo[u].items():
             if v in finalizados:
                 continue
@@ -93,7 +93,7 @@ def calcular_tabela(
                 "predecessores": dict(predecessor),
             })
 
-    # Passo 5: uma linha por roteador alcançável, fora a minha rede.
+    # Passo 5: uma linha por roteador alcançável, fora a minha rede
     # chave é a rede (10.G.R), então qualquer 10.G.R.x usa a rota
     minha_rede = rede_de(eu)
     tabela: dict[str, tuple[str, int]] = {}
