@@ -51,30 +51,34 @@ def analisar_argumentos(argv: list[str]) -> argparse.Namespace:
 
 def criar_socket(porta: int) -> socket.socket:
     """Cria o socket UDP único, ligado a ("0.0.0.0", porta)."""
-    # um só socket: a porta de origem é a configurada, e o vizinho nos reconhece por ela
+    # Usamos um só socket para enviar e receber. Assim nossos pacotes saem
+    # pela porta configurada, e o vizinho sabe que fomos nós que enviamos.
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    # Windows: evita ConnectionResetError quando um vizinho está desligado
+    # Correção para o Windows: sem isto, dá erro quando um vizinho está desligado.
     if hasattr(socket, "SIO_UDP_CONNRESET"):
         sock.ioctl(socket.SIO_UDP_CONNRESET, False)
-    # 0.0.0.0 escuta em todas as interfaces (127.0.0.1 só aceitaria a própria máquina)
+    # 0.0.0.0 recebe pacotes de qualquer máquina da rede.
+    # (127.0.0.1 só receberia pacotes da própria máquina.)
     sock.bind(("0.0.0.0", porta))
     return sock
 
 
 def thread_receptora(estado: Estado) -> None:
     """Laço de recvfrom. Nenhuma exceção encerra a thread em silêncio."""
-    # um try para a recepção e outro para o tratamento: nenhum erro mata a thread
     while True:
+        # Espera chegar um pacote. `origem` é o (ip, porta) de quem enviou.
         try:
-            # bloqueia até chegar um datagrama; origem = (ip, porta) real
             dados, origem = estado.sock.recvfrom(TAMANHO_MAX_DATAGRAMA)
         except ConnectionResetError:
-            continue  # Windows, vizinho desligado
+            continue  # Windows: vizinho desligado, só ignora
         except OSError as e:
             if estado.sock.fileno() == -1:
-                return  # socket fechado no encerramento
+                return  # o socket foi fechado: o roteador está encerrando
             log.evento(f"ERRO DE RECEPCAO: {e}")
             continue
+
+        # Trata o pacote. Se der qualquer erro, registra no log e continua;
+        # sem isso a thread pararia e o roteador deixaria de receber pacotes.
         try:
             tratar_datagrama(estado, dados, (origem[0], origem[1]))
         except Exception as e:
@@ -85,20 +89,25 @@ def thread_receptora(estado: Estado) -> None:
 def tratar_datagrama(estado: Estado, dados: bytes, origem_real: ParReal) -> None:
     """Filtros: origem conhecida, ASCII estrito, número de campos (pacotes.analisar)."""
     par_txt = f"{origem_real[0]}:{origem_real[1]}"
-    # só aceita pares (ip, porta) da configuração, ativos ou não
+
+    # Filtro 1: só aceita pacotes de quem está no arquivo de configuração.
     if origem_real not in estado.vizinhos:
         log.evento(f"ORIGEM DESCONHECIDA {par_txt}: pacote descartado")
         return
+
+    # Filtro 2: o texto precisa estar no formato certo.
     try:
         pacote = pacotes.analisar(dados)
     except pacotes.PacoteMalformado as e:
         log.evento(f"MALFORMADO de {par_txt}: {e}")
         return
+
     despachar(estado, pacote, origem_real)
 
 
 def despachar(estado: Estado, pacote: pacotes.Pacote, origem_real: ParReal) -> None:
     """Encaminha o pacote já analisado para o módulo responsável pelo tipo."""
+    # Cada tipo de pacote é tratado por um módulo diferente.
     if isinstance(pacote, pacotes.Hello):
         vizinhos.receber_hello(estado, pacote, origem_real)
     elif isinstance(pacote, pacotes.LSP):
@@ -111,15 +120,17 @@ def despachar(estado: Estado, pacote: pacotes.Pacote, origem_real: ParReal) -> N
 
 def thread_temporizadora(estado: Estado) -> None:
     """Acorda a cada 1 s e verifica os quatro temporizadores."""
-    # uma thread para os 4 temporizadores; cada função só age quando chega a hora
+    # A cada 1 segundo, verifica se chegou a hora de alguma tarefa periódica.
+    # Cada função abaixo decide sozinha se precisa fazer algo agora.
     while True:
-        # monotonic não anda para trás se o relógio do sistema mudar
+        # monotonic() é um relógio que só anda para frente; serve para medir
+        # intervalos (não muda se alguém ajustar a hora do computador).
         agora = time.monotonic()
         try:
-            vizinhos.enviar_hellos(estado, agora)
-            vizinhos.verificar_inatividade(estado, agora)
-            lsdb.renovar_se_preciso(estado, agora)
-            lsdb.envelhecer(estado, agora)
+            vizinhos.enviar_hellos(estado, agora)         # a cada 5 s
+            vizinhos.verificar_inatividade(estado, agora) # vizinho sem HELLO há 20 s
+            lsdb.renovar_se_preciso(estado, agora)        # LSP próprio a cada 30 s
+            lsdb.envelhecer(estado, agora)                # apaga LSPs com mais de 90 s
         except Exception as e:
             log.evento(f"ERRO NA TEMPORIZADORA: {type(e).__name__}: {e}")
         time.sleep(1.0)
@@ -127,37 +138,44 @@ def thread_temporizadora(estado: Estado) -> None:
 
 def main(argv: list[str]) -> int:
     args = analisar_argumentos(argv)
+
+    # 1. Lê o arquivo de configuração (encerra se tiver erro).
     try:
         cfg = config.carregar(args.config)
     except config.ErroConfiguracao as e:
         print(f"Erro na configuração: {e}", file=sys.stderr)
         return 1
 
+    # 2. Abre o socket na porta configurada.
     try:
         sock = criar_socket(cfg.porta)
     except OSError as e:
         print(f"Não foi possível usar a porta UDP {cfg.porta}: {e}", file=sys.stderr)
         return 1
 
+    # 3. Prepara o log e o estado do roteador.
     log.iniciar(cfg.endereco)
     estado = Estado(meu_endereco=cfg.endereco, porta=cfg.porta, sock=sock,
                     descartar_lsp=args.descartar_lsp)
     vizinhos.inicializar(estado, cfg.vizinhos)
 
-    # seq pelo relógio: depois de reiniciar, os LSPs novos têm seq maior que os antigos
+    # O primeiro número de sequência vem do relógio. Se o roteador reiniciar,
+    # o número novo é maior que o antigo e os vizinhos aceitam os LSPs novos.
     seq_inicial = args.seq_inicial if args.seq_inicial is not None else int(time.time())
-    estado.seq_proprio = seq_inicial - 1  # gerar_lsp_proprio soma 1 antes de usar
+    estado.seq_proprio = seq_inicial - 1  # -1 porque gerar_lsp_proprio soma 1 antes de usar
 
     log.evento(f"ROTEADOR INICIADO {cfg.endereco} porta={cfg.porta} "
                f"vizinhos configurados={len(cfg.vizinhos)}")
     lsdb.gerar_lsp_proprio(estado, "início")
 
-    # daemon: o programa encerra sem esperar estas threads
+    # 4. Inicia as duas threads de fundo. daemon=True faz elas terminarem
+    #    junto com o programa quando o usuário digita "sair".
     threading.Thread(target=thread_receptora, args=(estado,),
                      name="receptora", daemon=True).start()
     threading.Thread(target=thread_temporizadora, args=(estado,),
                      name="temporizadora", daemon=True).start()
 
+    # 5. A thread principal fica lendo os comandos do usuário.
     try:
         cli.laco(estado)
     finally:

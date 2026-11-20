@@ -9,10 +9,6 @@ Formatos:
     DADOS:<origem>:<destino>:<ttl>:<id>:<mensagem>
     ICMP:<origem>:<destino>:<ttl>:<id>:<tipo>
 
-ATENÇÃO: a ORDEM dos campos de DADOS e ICMP foi assumida a partir do plano
-(que só informa a quantidade). Conferir no enunciado; se mudar, basta ajustar
-_analisar_dados, _analisar_icmp, montar_dados e montar_icmp.
-
     Tipo   Campos  Verificações
     HELLO  2       endereço virtual válido
     LSP    4       origem válida, sequência inteira, itens vizinho=custo com
@@ -29,10 +25,11 @@ from typing import Union
 
 TTL_PADRAO = 16
 
-ICMP_ECO_RESPOSTA = 0
-ICMP_INALCANCAVEL = 3
-ICMP_ECO_PEDIDO = 8
-ICMP_TEMPO_EXCEDIDO = 11
+# Tipos de ICMP usados no trabalho.
+ICMP_ECO_RESPOSTA = 0     # resposta do ping
+ICMP_INALCANCAVEL = 3     # sem rota para o destino
+ICMP_ECO_PEDIDO = 8       # pedido do ping
+ICMP_TEMPO_EXCEDIDO = 11  # TTL chegou a 0 no caminho
 TIPOS_ICMP = {ICMP_ECO_RESPOSTA, ICMP_INALCANCAVEL, ICMP_ECO_PEDIDO, ICMP_TEMPO_EXCEDIDO}
 TIPOS_ERRO_ICMP = {ICMP_INALCANCAVEL, ICMP_TEMPO_EXCEDIDO}
 
@@ -40,6 +37,8 @@ TIPOS_ERRO_ICMP = {ICMP_INALCANCAVEL, ICMP_TEMPO_EXCEDIDO}
 class PacoteMalformado(Exception):
     """Pacote que não passa na validação; a mensagem vai para o log."""
 
+
+# Cada classe abaixo guarda os campos de um tipo de pacote.
 
 @dataclass
 class Hello:
@@ -51,7 +50,7 @@ class LSP:
     origem: str
     seq: int
     vizinhos: dict[str, int]
-    texto_original: str  # reenviado sem alteração na inundação
+    texto_original: str  # texto exato recebido, reenviado igual na inundação
 
 
 @dataclass
@@ -75,23 +74,22 @@ class ICMP:
 Pacote = Union[Hello, LSP, Dados, ICMP]
 
 
-# ---------- recepção ----------
+# ---------- recepção: texto -> objeto ----------
 
 def analisar(dados: bytes) -> Pacote:
     """Decodifica e valida um datagrama. Retorna Hello | LSP | Dados | ICMP.
     Lança PacoteMalformado em qualquer falha."""
-    # ASCII estrito: acentos ou bytes binários descartam o pacote
+    # Só aceita ASCII: acentos ou bytes estranhos fazem o pacote ser descartado.
     try:
         texto = dados.decode("ascii")
     except UnicodeDecodeError:
         raise PacoteMalformado("bytes fora do ASCII")
 
-    # aceita \n ou \r\n no fim (tolerância ao receber)
+    # Aceita uma quebra de linha no fim (outros grupos podem mandar).
     texto = texto.rstrip("\r\n")
+    # Os campos são separados por ':'. O primeiro campo diz o tipo.
     campos = texto.split(":")
     tipo = campos[0]
-
-    # cada tipo confere o número exato de campos
 
     if tipo == "HELLO":
         return _analisar_hello(campos)
@@ -105,17 +103,20 @@ def analisar(dados: bytes) -> Pacote:
 
 
 def _analisar_hello(campos: list[str]) -> Hello:
+    # HELLO:<endereço>
     _exigir_campos(campos, 2)
     return Hello(_endereco(campos[1], "endereço"))
 
 
 def _analisar_lsp(campos: list[str], texto: str) -> LSP:
+    # LSP:<origem>:<seq>:<viz>=<custo>;<viz>=<custo>
     _exigir_campos(campos, 4)
     origem = _endereco(campos[1], "origem")
     seq = _inteiro(campos[2], "sequência")
     vizinhos: dict[str, int] = {}
-    # ignora itens vazios: lista vazia ou ';' sobrando no fim
+    # Lê a lista de vizinhos, separada por ';'.
     for item in campos[3].split(";"):
+        # Pula itens vazios: lista vazia ou ';' sobrando no fim.
         if item == "":
             continue
         partes = item.split("=")
@@ -123,12 +124,12 @@ def _analisar_lsp(campos: list[str], texto: str) -> LSP:
             raise PacoteMalformado(f"item de LSP inválido {item[:30]!r}")
         vizinho = _endereco(partes[0], "vizinho do LSP")
         vizinhos[vizinho] = _inteiro(partes[1], "custo", minimo=1)
-    # texto original, reenviado sem alteração na inundação
     return LSP(origem, seq, vizinhos, texto)
 
 
 def _analisar_dados(campos: list[str]) -> Dados:
-    # ':' na mensagem gera mais de 6 campos e o pacote é rejeitado
+    # DADOS:<origem>:<destino>:<ttl>:<id>:<mensagem>
+    # Se a mensagem tiver ':', aparecem mais de 6 campos e o pacote é recusado.
     _exigir_campos(campos, 6)
     return Dados(
         origem=_endereco(campos[1], "origem"),
@@ -140,6 +141,7 @@ def _analisar_dados(campos: list[str]) -> Dados:
 
 
 def _analisar_icmp(campos: list[str]) -> ICMP:
+    # ICMP:<origem>:<destino>:<ttl>:<id>:<tipo>
     _exigir_campos(campos, 6)
     tipo = _inteiro(campos[5], "tipo ICMP")
     if tipo not in TIPOS_ICMP:
@@ -152,6 +154,9 @@ def _analisar_icmp(campos: list[str]) -> ICMP:
         tipo=tipo,
     )
 
+
+# Funções auxiliares de validação: se algo estiver errado, lançam
+# PacoteMalformado com uma mensagem que vai para o log.
 
 def _exigir_campos(campos: list[str], n: int) -> None:
     if len(campos) != n:
@@ -166,7 +171,7 @@ def _endereco(texto: str, nome: str) -> str:
 
 
 def _inteiro(texto: str, nome: str, minimo: int = 0) -> int:
-    # isdigit() rejeita " 5", "+5" e "-5", que int() aceitaria
+    # Só aceita dígitos. (int() sozinho aceitaria " 5", "+5" e "-5".)
     if not (texto.isascii() and texto.isdigit()) or int(texto) < minimo:
         raise PacoteMalformado(f"{nome} inválido {texto[:30]!r}")
     return int(texto)
@@ -179,16 +184,16 @@ def endereco_valido(endereco: str) -> bool:
         o.isascii() and o.isdigit() and int(o) <= 255 for o in octetos)
 
 
-# ---------- envio ----------
-
-# Montagem: formato exato, em ASCII, sem quebra de linha.
+# ---------- envio: objeto -> texto ----------
+# Todos os pacotes enviados são montados aqui, sempre no formato exato,
+# em ASCII e sem quebra de linha no fim.
 
 def montar_hello(endereco: str) -> bytes:
     return f"HELLO:{endereco}".encode("ascii")
 
 
 def montar_lsp(origem: str, seq: int, vizinhos: dict[str, int]) -> bytes:
-    # ordenado para o texto sair sempre igual
+    # Vizinhos em ordem, para o texto sair sempre igual.
     lista = ";".join(f"{v}={c}" for v, c in sorted(vizinhos.items()))
     return f"LSP:{origem}:{seq}:{lista}".encode("ascii")
 

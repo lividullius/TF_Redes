@@ -40,6 +40,8 @@ def laco(estado: Estado) -> None:
             linha = input()
         except (EOFError, KeyboardInterrupt):
             break
+        # Separa o nome do comando do resto da linha.
+        # Ex.: "msg 10.1.5.1 ola" -> nome="msg", resto="10.1.5.1 ola"
         partes = linha.strip().split(maxsplit=1)
         if not partes:
             continue
@@ -51,9 +53,10 @@ def laco(estado: Estado) -> None:
         if comando is None:
             print(f"Comando desconhecido: {nome}. Use: {', '.join(COMANDOS)}, sair")
             continue
+        # Um erro dentro de um comando não pode derrubar o roteador.
         try:
             comando(estado, resto)
-        except Exception as e:  # um comando nunca derruba o roteador
+        except Exception as e:
             print(f"Erro ao executar {nome}: {e}")
 
 
@@ -62,7 +65,8 @@ def cmd_ajuda(estado: Estado, resto: str) -> None:
 
 
 def cmd_tabela(estado: Estado, resto: str) -> None:
-    # copia sob o lock e imprime fora dele
+    # Copia os dados com o lock e imprime depois, para não travar
+    # as outras threads enquanto escreve na tela.
     with estado.lock:
         linhas = sorted(estado.tabela.items(), key=lambda kv: _chave_endereco(kv[0]))
     if not linhas:
@@ -79,7 +83,7 @@ def cmd_lsdb(estado: Estado, resto: str) -> None:
         entradas = sorted(estado.lsdb.items(), key=lambda kv: _chave_endereco(kv[0]))
     print(f"{'Origem':<14}{'Sequência':<14}{'Idade':>6}  Vizinhos")
     for origem, e in entradas:
-        idade = int(agora - e.recebido_em)
+        idade = int(agora - e.recebido_em)  # segundos desde que o LSP chegou
         print(f"{origem:<14}{e.seq:<14}{idade:>5}s  {lsdb.formatar_vizinhos(e.vizinhos)}")
 
 
@@ -96,6 +100,7 @@ def cmd_vizinhos(estado: Estado, resto: str) -> None:
 
 
 def cmd_msg(estado: Estado, resto: str) -> None:
+    # Separa o destino do texto (o texto pode ter espaços).
     partes = resto.split(maxsplit=1)
     if len(partes) != 2:
         print("Uso: msg <destino> <texto>")
@@ -104,9 +109,11 @@ def cmd_msg(estado: Estado, resto: str) -> None:
     if not pacotes.endereco_valido(destino):
         print(f"Destino inválido: {destino}")
         return
+    # ':' quebraria o formato do pacote; acentos não são ASCII.
     if not pacotes.mensagem_valida(texto):
         print("Mensagem recusada: não pode conter ':' nem caracteres fora do ASCII (acentos).")
         return
+    # Mensagens sempre saem com TTL 16 e id 0.
     pacote = pacotes.Dados(estado.meu_endereco, destino, pacotes.TTL_PADRAO, 0, texto)
     if encaminhamento.originar(estado, pacote):
         log.evento(f"DADOS ORIGINADO {estado.meu_endereco}->{destino}")
@@ -123,6 +130,7 @@ def cmd_ping(estado: Estado, resto: str) -> None:
     if not pacotes.endereco_valido(destino):
         print(f"Destino inválido: {destino}")
         return
+    # O TTL é opcional (padrão 16). Com TTL pequeno dá para ver o caminho.
     ttl = pacotes.TTL_PADRAO
     if len(partes) == 2:
         if not partes[1].isdigit() or int(partes[1]) < 1:
@@ -131,21 +139,26 @@ def cmd_ping(estado: Estado, resto: str) -> None:
         ttl = int(partes[1])
 
     with estado.lock:
-        id_ = estado.prox_id  # id liga a resposta ao pedido
+        # Cada ping tem um id diferente; a resposta volta com o mesmo id.
+        id_ = estado.prox_id
         estado.prox_id += 1
-        # registra antes de enviar: a resposta pode chegar muito rápido
+        # Anota o ping como "esperando resposta" ANTES de enviar,
+        # porque a resposta pode chegar muito rápido.
         pendente = PingPendente(enviado_em=time.monotonic(), destino=destino)
         estado.pings_pendentes[id_] = pendente
         pedido = pacotes.ICMP(estado.meu_endereco, destino, ttl, id_,
                               pacotes.ICMP_ECO_PEDIDO)
         enviado = encaminhamento.originar(estado, pedido)
-        if not enviado:
+        if enviado:
+            log.evento(f"ICMP GERADO tipo=8 para={destino} id={id_}")
+        else:
             del estado.pings_pendentes[id_]
     if not enviado:
         print(f"Destino inalcançável: sem rota para {destino}.")
         return
 
-    # espera fora do lock, senão a receptora não processa a resposta
+    # Espera a resposta por até 2 s. Isso fica FORA do lock: quem recebe a
+    # resposta é a thread receptora, e ela precisa do lock para isso.
     pendente.evento.wait(TIMEOUT_PING)
 
     with estado.lock:
@@ -154,7 +167,7 @@ def cmd_ping(estado: Estado, resto: str) -> None:
     if resposta is None:
         print(f"ping {destino} id={id_} ttl={ttl}: timeout após {TIMEOUT_PING:.0f} s")
         return
-    # RTT em ms
+    # RTT = tempo entre enviar o pedido e receber a resposta, em ms.
     rtt = (recebido_em - pendente.enviado_em) * 1000
     descricao = {
         pacotes.ICMP_ECO_RESPOSTA: "resposta de eco",
@@ -166,18 +179,22 @@ def cmd_ping(estado: Estado, resto: str) -> None:
 
 
 def cmd_dijkstra(estado: Estado, resto: str) -> None:
+    """Mostra cada iteração do Dijkstra (para a questão 1 do relatório)."""
     simples = lsdb.lsdb_simples(estado)
     eu = estado.meu_endereco
     colunas: list[str] = []
     largura = 16
 
+    # Chamada pelo Dijkstra a cada iteração; imprime uma linha da tabela.
     def mostrar(it: dict) -> None:
+        # Na primeira iteração, imprime o cabeçalho com um roteador por coluna.
         if not colunas:
             colunas.extend(sorted((n for n in it["distancias"] if n != eu),
                                   key=_chave_endereco))
             print("Cada coluna: D(v),p(v)   * = finalizado")
             print(f"{'It':<4}{'Finalizado':<12}" +
                   "".join(f"{n:<{largura}}" for n in colunas))
+        # Cada célula: distância e predecessor (de onde se chega a esse nó).
         celulas = []
         for n in colunas:
             d = it["distancias"][n]
@@ -195,6 +212,7 @@ def cmd_dijkstra(estado: Estado, resto: str) -> None:
 
 
 def cmd_stats(estado: Estado, resto: str) -> None:
+    """Contadores de LSP (para a questão 2 do relatório)."""
     with estado.lock:
         c = estado.contadores
         print(f"LSPs gerados:             {c.lsp_gerados}")
@@ -203,6 +221,7 @@ def cmd_stats(estado: Estado, resto: str) -> None:
         print(f"LSPs descartados (cópia): {c.lsp_copias_descartadas}")
 
 
+# Liga o nome digitado à função que executa o comando.
 COMANDOS = {
     "tabela": cmd_tabela,
     "lsdb": cmd_lsdb,

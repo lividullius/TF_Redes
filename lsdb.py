@@ -33,16 +33,21 @@ IDADE_MAXIMA = 90.0
 
 
 def formatar_vizinhos(viz: dict[str, int]) -> str:
+    """Texto para log e comandos: '10.1.2.1=1,10.1.3.1=4'."""
     return ",".join(f"{v}={c}" for v, c in sorted(viz.items())) or "(nenhum)"
 
 
 def gerar_lsp_proprio(estado: Estado, motivo: str) -> None:
+    """Cria um LSP novo nosso, guarda na LSDB e envia a todos os vizinhos ativos."""
     with estado.lock:
         agora = time.monotonic()
-        estado.seq_proprio += 1  # seq maior indica LSP mais novo
-        # só vizinhos ativos entram no LSP
+        # Número de sequência maior = LSP mais novo.
+        estado.seq_proprio += 1
+        # O LSP lista só os vizinhos que estão funcionando agora.
         viz = vizinhos.vizinhos_ativos(estado)
         dados = pacotes.montar_lsp(estado.meu_endereco, estado.seq_proprio, viz)
+
+        # Guarda o próprio LSP na LSDB (o Dijkstra também precisa dele).
         estado.lsdb[estado.meu_endereco] = EntradaLSDB(
             seq=estado.seq_proprio,
             vizinhos=viz,
@@ -50,10 +55,11 @@ def gerar_lsp_proprio(estado: Estado, motivo: str) -> None:
             texto_original=dados.decode("ascii"),
         )
         estado.contadores.lsp_gerados += 1
-        # qualquer LSP gerado reinicia o prazo de 30 s
+        # A próxima renovação fica para daqui a 30 s.
         estado.proxima_renovacao = agora + INTERVALO_RENOVACAO
         log.evento(f"LSP GERADO seq={estado.seq_proprio} "
                    f"vizinhos={formatar_vizinhos(viz)} ({motivo})")
+
         for par in vizinhos.pares_ativos(estado):
             vizinhos.enviar_para_par(estado, dados, par)
         recalcular_tabela(estado, "LSP próprio gerado")
@@ -62,15 +68,17 @@ def gerar_lsp_proprio(estado: Estado, motivo: str) -> None:
 def receber_lsp(estado: Estado, lsp: pacotes.LSP, origem_real: ParReal) -> None:
     """Aplica as três regras de recebimento (e --descartar-lsp, se ligado)."""
     with estado.lock:
+        # Nome de quem nos mandou o LSP, para o log.
         via = estado.vizinhos[origem_real].endereco_virtual or \
             f"{origem_real[0]}:{origem_real[1]}"
 
-        # Regra 1: meu próprio LSP voltando pela inundação
+        # Regra 1: é o nosso próprio LSP que voltou pela rede. Ignora.
         if lsp.origem == estado.meu_endereco:
             log.evento(f"LSP PROPRIO DESCARTADO seq={lsp.seq} via={via}", terminal=False)
             return
 
-        # Regra 2: cópia ou LSP antigo; é o que faz a inundação terminar
+        # Regra 2: já temos esse LSP (ou um mais novo). Ignora.
+        # É isso que faz a inundação parar: cada roteador repassa só uma vez.
         atual = estado.lsdb.get(lsp.origem)
         if atual is not None and atual.seq >= lsp.seq:
             estado.contadores.lsp_copias_descartadas += 1
@@ -78,14 +86,14 @@ def receber_lsp(estado: Estado, lsp: pacotes.LSP, origem_real: ParReal) -> None:
                        f"(armazenado seq={atual.seq})")
             return
 
-        # Experimento da questão 5: perder de propósito o N-ésimo LSP novo.
+        # Só para o relatório (questão 5): perde de propósito o N-ésimo LSP novo.
         estado.lsps_novos_recebidos += 1
         if estado.descartar_lsp and estado.lsps_novos_recebidos == estado.descartar_lsp:
             log.evento(f"LSP DESCARTADO DE PROPOSITO origem={lsp.origem} "
                        f"seq={lsp.seq} via={via} (--descartar-lsp)")
             return
 
-        # Regra 3: LSP novo.
+        # Regra 3: LSP novo. Guarda na LSDB, anotando a hora em que chegou.
         estado.lsdb[lsp.origem] = EntradaLSDB(
             seq=lsp.seq,
             vizinhos=dict(lsp.vizinhos),
@@ -95,18 +103,20 @@ def receber_lsp(estado: Estado, lsp: pacotes.LSP, origem_real: ParReal) -> None:
         estado.contadores.lsp_aceitos += 1
         log.evento(f"LSP NOVO origem={lsp.origem} seq={lsp.seq} via={via} "
                    f"vizinhos={formatar_vizinhos(lsp.vizinhos)}")
-        # repassa a todos os ativos, menos a quem nos mandou
+        # Repassa para os outros vizinhos (não para quem nos mandou).
         inundar(estado, lsp.texto_original, exceto=origem_real)
+        # A rede mudou: recalcula as rotas.
         recalcular_tabela(estado, f"LSP novo de {lsp.origem}")
 
 
 def inundar(estado: Estado, texto_original: str, exceto: Optional[ParReal]) -> None:
     """Reenvia o texto original, sem alterar nada, a todos os ativos exceto V."""
+    # Reenvia o texto exatamente como chegou, sem mudar nada.
     dados = texto_original.encode("ascii")
     with estado.lock:
         for par in vizinhos.pares_ativos(estado):
             if par == exceto:
-                continue
+                continue  # quem mandou já tem esse LSP
             vizinhos.enviar_para_par(estado, dados, par)
             estado.contadores.lsp_reenviados += 1
 
@@ -119,17 +129,21 @@ def sincronizar_vizinho(estado: Estado, par: ParReal) -> None:
 
 
 def renovar_se_preciso(estado: Estado, agora: float) -> None:
+    """A cada 30 s gera um LSP novo, mesmo sem mudança na rede.
+    Isso corrige LSPs perdidos e impede que o nosso envelheça nos outros."""
     with estado.lock:
         if agora >= estado.proxima_renovacao:
             gerar_lsp_proprio(estado, "renovação")
 
 
 def envelhecer(estado: Estado, agora: float) -> None:
+    """Apaga LSPs de outros roteadores que não são renovados há mais de 90 s."""
     with estado.lock:
-        # o LSP próprio não envelhece; monta a lista antes de remover do dict
+        # Primeiro separa os LSPs velhos (o nosso nunca envelhece)...
         velhos = [origem for origem, e in estado.lsdb.items()
                   if origem != estado.meu_endereco
                   and agora - e.recebido_em > IDADE_MAXIMA]
+        # ...depois apaga. (Não dá para apagar do dicionário enquanto percorre ele.)
         for origem in velhos:
             entrada = estado.lsdb.pop(origem)
             log.evento(f"LSP ENVELHECIDO origem={origem} seq={entrada.seq} removido")

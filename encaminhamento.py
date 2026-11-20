@@ -35,21 +35,23 @@ PacoteRoteavel = Union[Dados, ICMP]
 
 
 def eh_local(estado: Estado, destino: str) -> bool:
+    """True se o destino está na nossa rede (ex.: 10.1.1.x para o R1)."""
     return rede_de(destino) == rede_de(estado.meu_endereco)
 
 
 def originar(estado: Estado, pacote: PacoteRoteavel) -> bool:
     """Consulta a rota e envia. Retorna False se não houver rota/associação."""
+    # Usado quando ESTE roteador cria o pacote (msg, ping, respostas e erros).
     with estado.lock:
-        # destino na minha rede: processa como se tivesse chegado
+        # Destino na nossa própria rede: entrega aqui mesmo.
         if eh_local(estado, pacote.destino):
             entregar_local(estado, pacote)
             return True
-        # ao originar não se decrementa o TTL
+        # Procura a rota pela rede do destino (ex.: 10.1.5).
         rota = estado.tabela.get(rede_de(pacote.destino))
         if rota is None:
-            return False
-        # traduz o endereço virtual para (ip, porta); False se o vizinho está inativo
+            return False  # sem rota: nada é enviado
+        # Envia ao próximo salto. Retorna False se esse vizinho estiver inativo.
         return vizinhos.enviar(estado, pacotes.montar(pacote), rota.proximo_salto)
 
 
@@ -57,9 +59,9 @@ def receber(estado: Estado, pacote: PacoteRoteavel) -> None:
     """Ponto de entrada da thread receptora para DADOS e ICMP."""
     with estado.lock:
         if eh_local(estado, pacote.destino):
-            entregar_local(estado, pacote)
+            entregar_local(estado, pacote)   # é para nós
         else:
-            encaminhar(estado, pacote)
+            encaminhar(estado, pacote)       # é para outro roteador: repassa
 
 
 def receber_dados(estado: Estado, dados: Dados) -> None:
@@ -71,6 +73,8 @@ def receber_icmp(estado: Estado, icmp: ICMP) -> None:
 
 
 def entregar_local(estado: Estado, pacote: PacoteRoteavel) -> None:
+    """Trata um pacote que chegou ao destino final (a nossa rede)."""
+    # Mensagem de texto: só mostra na tela.
     if isinstance(pacote, Dados):
         log.evento(f"MENSAGEM RECEBIDA de={pacote.origem} para={pacote.destino}: "
                    f"{pacote.mensagem}")
@@ -79,13 +83,15 @@ def entregar_local(estado: Estado, pacote: PacoteRoteavel) -> None:
     log.evento(f"ICMP RECEBIDO tipo={pacote.tipo} de={pacote.origem} id={pacote.id}",
                terminal=False)
 
+    # Pedido de eco (alguém fez ping para nós): responde com tipo 0.
     if pacote.tipo == pacotes.ICMP_ECO_PEDIDO:
         resposta = ICMP(
-            # responde como o endereço pingado, não como o roteador
+            # A resposta sai com o endereço que foi pingado (ex.: 10.1.5.77),
+            # e não com o endereço do roteador.
             origem=pacote.destino,
             destino=pacote.origem,
             ttl=pacotes.TTL_PADRAO,
-            id=pacote.id,
+            id=pacote.id,  # mesmo id do pedido
             tipo=pacotes.ICMP_ECO_RESPOSTA,
         )
         log.evento(f"ICMP GERADO tipo=0 para={resposta.destino} id={resposta.id}")
@@ -93,7 +99,8 @@ def entregar_local(estado: Estado, pacote: PacoteRoteavel) -> None:
             log.evento(f"SEM ROTA para {resposta.destino}: resposta de eco não enviada")
         return
 
-    # tipos 0, 3 e 11: o id liga a resposta ao ping pendente
+    # Tipos 0, 3 e 11: é a resposta de um ping que nós fizemos.
+    # O id diz de qual ping é a resposta.
     pendente = estado.pings_pendentes.get(pacote.id)
     if pendente is None or pendente.resposta is not None:
         log.evento(f"ICMP tipo={pacote.tipo} de={pacote.origem} id={pacote.id} "
@@ -101,7 +108,7 @@ def entregar_local(estado: Estado, pacote: PacoteRoteavel) -> None:
         return
     pendente.resposta = pacote
     pendente.recebido_em = time.monotonic()
-    # acorda o comando ping, parado em evento.wait()
+    # Avisa o comando ping (que está esperando) que a resposta chegou.
     pendente.evento.set()
 
 
@@ -110,34 +117,39 @@ def encaminhar(estado: Estado, pacote: PacoteRoteavel) -> None:
     with estado.lock:
         desc = pacotes.descrever(pacote)
 
-        # 1. TTL primeiro, depois a rota (ordem do plano)
+        # Passo 1: diminui o TTL. Se chegar a 0, o pacote "morre" aqui
+        # e avisamos quem enviou com ICMP tipo 11 (tempo excedido).
+        # (O TTL é testado antes da rota, como pede o plano.)
         novo_ttl = pacote.ttl - 1
         if novo_ttl <= 0:
             log.evento(f"DESCARTADO {desc} id={pacote.id}: TTL esgotado")
             gerar_erro_icmp(estado, pacote, pacotes.ICMP_TEMPO_EXCEDIDO)
             return
 
-        # 2. rota (próximo salto sem associação conta como sem rota)
+        # Passo 2: procura a rota. Sem rota (ou com o próximo salto inativo),
+        # descarta e avisa quem enviou com ICMP tipo 3 (destino inalcançável).
         rota = estado.tabela.get(rede_de(pacote.destino))
-        # cópia do pacote com o novo TTL
-        novo = dataclasses.replace(pacote, ttl=novo_ttl)
+        novo = dataclasses.replace(pacote, ttl=novo_ttl)  # mesmo pacote, TTL novo
         if rota is None or not vizinhos.enviar(estado, pacotes.montar(novo),
                                                rota.proximo_salto):
             log.evento(f"DESCARTADO {desc} id={pacote.id}: sem rota")
             gerar_erro_icmp(estado, pacote, pacotes.ICMP_INALCANCAVEL)
             return
 
-        # 3. Encaminhado
+        # Passo 3: deu certo, o pacote foi enviado ao próximo salto.
         log.evento(f"ENCAMINHADO {desc} prox={rota.proximo_salto} ttl={novo_ttl}")
 
 
 def gerar_erro_icmp(estado: Estado, causador: PacoteRoteavel, tipo: int) -> None:
     """Gera ICMP 3 ou 11 respeitando a regra de não responder erro com erro."""
-    # nunca responder erro com erro, para não gerar troca infinita
+    # Se o pacote descartado já era uma mensagem de erro, não gera outra.
+    # Senão, dois roteadores poderiam ficar trocando erros sem parar.
     if isinstance(causador, ICMP) and causador.tipo in pacotes.TIPOS_ERRO_ICMP:
         log.evento(f"ICMP NAO GERADO: pacote descartado já era erro "
                    f"(tipo={causador.tipo} id={causador.id})")
         return
+    # O erro sai com o NOSSO endereço (é assim que o ping descobre o caminho)
+    # e com o mesmo id do pacote que causou o erro.
     erro = ICMP(
         origem=estado.meu_endereco,
         destino=causador.origem,
