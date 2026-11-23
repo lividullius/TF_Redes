@@ -85,9 +85,9 @@ def analisar(dados: bytes) -> Pacote:
     except UnicodeDecodeError:
         raise PacoteMalformado("bytes fora do ASCII")
 
-    # Aceita uma quebra de linha no fim (outros grupos podem mandar).
+    # Aceita uma quebra de linha no fim (outros grupos podem mandar)
     texto = texto.rstrip("\r\n")
-    # Os campos são separados por ':'. O primeiro campo diz o tipo.
+    # Os campos são separados por ':'. O primeiro campo diz o tipo
     campos = texto.split(":")
     tipo = campos[0]
 
@@ -114,9 +114,9 @@ def _analisar_lsp(campos: list[str], texto: str) -> LSP:
     origem = _endereco(campos[1], "origem")
     seq = _inteiro(campos[2], "sequência")
     vizinhos: dict[str, int] = {}
-    # Lê a lista de vizinhos, separada por ';'.
+    # Lê a lista de vizinhos, separada por ';'
     for item in campos[3].split(";"):
-        # Pula itens vazios: lista vazia ou ';' sobrando no fim.
+        # Pula itens vazios: lista vazia ou ';' sobrando no fim
         if item == "":
             continue
         partes = item.split("=")
@@ -129,7 +129,7 @@ def _analisar_lsp(campos: list[str], texto: str) -> LSP:
 
 def _analisar_dados(campos: list[str]) -> Dados:
     # DADOS:<origem>:<destino>:<ttl>:<id>:<mensagem>
-    # Se a mensagem tiver ':', aparecem mais de 6 campos e o pacote é recusado.
+    # Se a mensagem tiver ':', aparecem mais de 6 campos e o pacote é recusado
     _exigir_campos(campos, 6)
     return Dados(
         origem=_endereco(campos[1], "origem"),
@@ -156,7 +156,7 @@ def _analisar_icmp(campos: list[str]) -> ICMP:
 
 
 # Funções auxiliares de validação: se algo estiver errado, lançam
-# PacoteMalformado com uma mensagem que vai para o log.
+# PacoteMalformado com uma mensagem que vai para o log
 
 def _exigir_campos(campos: list[str], n: int) -> None:
     if len(campos) != n:
@@ -186,7 +186,7 @@ def endereco_valido(endereco: str) -> bool:
 
 # ---------- envio: objeto -> texto ----------
 # Todos os pacotes enviados são montados aqui, sempre no formato exato,
-# em ASCII e sem quebra de linha no fim.
+# em ASCII e sem quebra de linha no fim
 
 def montar_hello(endereco: str) -> bytes:
     return f"HELLO:{endereco}".encode("ascii")

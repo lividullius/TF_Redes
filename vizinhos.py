@@ -24,7 +24,7 @@ LIMITE_INATIVIDADE = 20.0
 
 def inicializar(estado: Estado, vizinhos_config) -> None:
     """Preenche estado.vizinhos a partir da configuração (todos inativos)."""
-    # Todos os vizinhos começam inativos; ficam ativos quando mandam HELLO.
+    # Todos os vizinhos começam inativos; ficam ativos quando mandam HELLO
     with estado.lock:
         for v in vizinhos_config:
             estado.vizinhos[(v.ip, v.porta)] = Vizinho(custo=v.custo)
@@ -33,13 +33,13 @@ def inicializar(estado: Estado, vizinhos_config) -> None:
 def enviar_hellos(estado: Estado, agora: float) -> None:
     """Chamado pela temporizadora; envia HELLO se passaram 5 s."""
     with estado.lock:
-        # Ainda não passaram 5 s desde o último envio: não faz nada.
+        # Ainda não passaram 5 s desde o último envio: não faz nada
         if agora < estado.proximo_hello:
             return
         estado.proximo_hello = agora + INTERVALO_HELLO
         dados = pacotes.montar_hello(estado.meu_endereco)
         # Manda para TODOS os vizinhos configurados, mesmo os inativos;
-        # é assim que um vizinho que acabou de ligar descobre que estamos aqui.
+        # é assim que um vizinho que acabou de ligar descobre que estamos aqui
         for par in estado.vizinhos:
             enviar_para_par(estado, dados, par)
             log.evento(f"HELLO ENVIADO para {par[0]}:{par[1]}", terminal=False)
@@ -52,18 +52,18 @@ def receber_hello(estado: Estado, hello: pacotes.Hello, origem_real: ParReal) ->
         par_txt = f"{origem_real[0]}:{origem_real[1]}"
         log.evento(f"HELLO RECEBIDO de {hello.endereco} ({par_txt})", terminal=False)
 
-        # Um vizinho dizendo que tem o nosso endereço é erro de configuração.
+        # Um vizinho dizendo que tem o nosso endereço é erro de configuração
         if hello.endereco == estado.meu_endereco:
             log.evento(f"HELLO IGNORADO: {par_txt} anuncia o meu próprio endereço")
             return
 
-        # Regra 2: anota a hora do HELLO (o vizinho continua vivo).
+        # Regra 2: anota a hora do HELLO (o vizinho continua vivo)
         viz.ultimo_hello = time.monotonic()
 
         if not viz.ativo:
             # Regra 3: o vizinho acabou de aparecer.
             # Guardamos o endereço virtual dele (ex.: 10.1.2.1) ligado ao
-            # ip e porta reais, para saber para onde mandar os pacotes.
+            # ip e porta reais, para saber para onde mandar os pacotes
             viz.ativo = True
             viz.endereco_virtual = hello.endereco
             estado.virt_para_real[hello.endereco] = origem_real
@@ -71,12 +71,12 @@ def receber_hello(estado: Estado, hello: pacotes.Hello, origem_real: ParReal) ->
             # A rede mudou: avisamos todos com um LSP novo.
             lsdb.gerar_lsp_proprio(estado, "vizinho ativo")
             # O vizinho pode ter acabado de ligar e não conhecer a rede:
-            # mandamos para ele todos os LSPs que temos.
+            # mandamos para ele todos os LSPs que temos
             lsdb.sincronizar_vizinho(estado, origem_real)
 
         elif viz.endereco_virtual != hello.endereco:
-            # Regra 4: o mesmo ip e porta agora usam outro endereço virtual.
-            # Trocamos o endereço guardado e avisamos a rede com um LSP novo.
+            # Regra 4: o mesmo ip e porta agora usam outro endereço virtual
+            # Trocamos o endereço guardado e avisamos a rede com um LSP novo
             antigo = viz.endereco_virtual
             if estado.virt_para_real.get(antigo) == origem_real:
                 del estado.virt_para_real[antigo]
@@ -91,15 +91,15 @@ def verificar_inatividade(estado: Estado, agora: float) -> None:
     with estado.lock:
         mudou = False
         for par, viz in estado.vizinhos.items():
-            # Regra 5: mais de 20 s sem HELLO = vizinho caiu.
+            # Regra 5: mais de 20 s sem HELLO = vizinho caiu
             if viz.ativo and agora - viz.ultimo_hello > LIMITE_INATIVIDADE:
                 viz.ativo = False
-                # Esquecemos para onde mandar pacotes desse vizinho.
+                # Esquecemos para onde mandar pacotes desse vizinho
                 if estado.virt_para_real.get(viz.endereco_virtual) == par:
                     del estado.virt_para_real[viz.endereco_virtual]
                 log.evento(f"VIZINHO INATIVO {viz.endereco_virtual} ({par[0]}:{par[1]})")
                 mudou = True
-        # Um LSP só, mesmo que vários vizinhos tenham caído ao mesmo tempo.
+        # Um LSP só, mesmo que vários vizinhos tenham caído ao mesmo tempo
         if mudou:
             lsdb.gerar_lsp_proprio(estado, "vizinho inativo")
 
@@ -119,7 +119,7 @@ def pares_ativos(estado: Estado) -> list[ParReal]:
 
 def enviar_para_par(estado: Estado, dados: bytes, par: ParReal) -> None:
     """Envia pelo socket único. Erros de envio só vão para o log."""
-    # O UDP não avisa se o pacote chegou; aqui só caem erros da própria máquina.
+    # O UDP não avisa se o pacote chegou; aqui só caem erros da própria máquina
     try:
         estado.sock.sendto(dados, par)
     except OSError as e:

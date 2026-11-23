@@ -53,7 +53,7 @@ def laco(estado: Estado) -> None:
         if comando is None:
             print(f"Comando desconhecido: {nome}. Use: {', '.join(COMANDOS)}, sair")
             continue
-        # Um erro dentro de um comando não pode derrubar o roteador.
+        # Um erro dentro de um comando não pode derrubar o roteador
         try:
             comando(estado, resto)
         except Exception as e:
@@ -66,7 +66,7 @@ def cmd_ajuda(estado: Estado, resto: str) -> None:
 
 def cmd_tabela(estado: Estado, resto: str) -> None:
     # Copia os dados com o lock e imprime depois, para não travar
-    # as outras threads enquanto escreve na tela.
+    # as outras threads enquanto escreve na tela
     with estado.lock:
         linhas = sorted(estado.tabela.items(), key=lambda kv: _chave_endereco(kv[0]))
     if not linhas:
@@ -100,7 +100,7 @@ def cmd_vizinhos(estado: Estado, resto: str) -> None:
 
 
 def cmd_msg(estado: Estado, resto: str) -> None:
-    # Separa o destino do texto (o texto pode ter espaços).
+    # Separa o destino do texto (o texto pode ter espaços)
     partes = resto.split(maxsplit=1)
     if len(partes) != 2:
         print("Uso: msg <destino> <texto>")
@@ -130,7 +130,7 @@ def cmd_ping(estado: Estado, resto: str) -> None:
     if not pacotes.endereco_valido(destino):
         print(f"Destino inválido: {destino}")
         return
-    # O TTL é opcional (padrão 16). Com TTL pequeno dá para ver o caminho.
+    # O TTL é opcional (padrão 16) Com TTL pequeno dá para ver o caminho
     ttl = pacotes.TTL_PADRAO
     if len(partes) == 2:
         if not partes[1].isdigit() or int(partes[1]) < 1:
@@ -139,7 +139,7 @@ def cmd_ping(estado: Estado, resto: str) -> None:
         ttl = int(partes[1])
 
     with estado.lock:
-        # Cada ping tem um id diferente; a resposta volta com o mesmo id.
+        # Cada ping tem um id diferente; a resposta volta com o mesmo id
         id_ = estado.prox_id
         estado.prox_id += 1
         # Anota o ping como "esperando resposta" ANTES de enviar,
@@ -157,8 +157,8 @@ def cmd_ping(estado: Estado, resto: str) -> None:
         print(f"Destino inalcançável: sem rota para {destino}.")
         return
 
-    # Espera a resposta por até 2 s. Isso fica FORA do lock: quem recebe a
-    # resposta é a thread receptora, e ela precisa do lock para isso.
+    # Espera a resposta por até 2 s. Isso fica fora do lock: quem recebe a
+    # resposta é a thread receptora, e ela precisa do lock para isso
     pendente.evento.wait(TIMEOUT_PING)
 
     with estado.lock:
@@ -167,7 +167,7 @@ def cmd_ping(estado: Estado, resto: str) -> None:
     if resposta is None:
         print(f"ping {destino} id={id_} ttl={ttl}: timeout após {TIMEOUT_PING:.0f} s")
         return
-    # RTT = tempo entre enviar o pedido e receber a resposta, em ms.
+    # RTT = tempo entre enviar o pedido e receber a resposta, em ms
     rtt = (recebido_em - pendente.enviado_em) * 1000
     descricao = {
         pacotes.ICMP_ECO_RESPOSTA: "resposta de eco",
@@ -185,16 +185,16 @@ def cmd_dijkstra(estado: Estado, resto: str) -> None:
     colunas: list[str] = []
     largura = 16
 
-    # Chamada pelo Dijkstra a cada iteração; imprime uma linha da tabela.
+    # Chamada pelo Dijkstra a cada iteração; imprime uma linha da tabela
     def mostrar(it: dict) -> None:
-        # Na primeira iteração, imprime o cabeçalho com um roteador por coluna.
+        # Na primeira iteração, imprime o cabeçalho com um roteador por coluna
         if not colunas:
             colunas.extend(sorted((n for n in it["distancias"] if n != eu),
                                   key=_chave_endereco))
             print("Cada coluna: D(v),p(v)   * = finalizado")
             print(f"{'It':<4}{'Finalizado':<12}" +
                   "".join(f"{n:<{largura}}" for n in colunas))
-        # Cada célula: distância e predecessor (de onde se chega a esse nó).
+        # Cada célula: distância e predecessor (de onde se chega a esse nó)
         celulas = []
         for n in colunas:
             d = it["distancias"][n]
@@ -221,7 +221,7 @@ def cmd_stats(estado: Estado, resto: str) -> None:
         print(f"LSPs descartados (cópia): {c.lsp_copias_descartadas}")
 
 
-# Liga o nome digitado à função que executa o comando.
+# Liga o nome digitado à função que executa o comando
 COMANDOS = {
     "tabela": cmd_tabela,
     "lsdb": cmd_lsdb,

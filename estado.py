@@ -69,7 +69,7 @@ class Estado:
     porta: int
     # Trava que impede duas threads de mexer no estado ao mesmo tempo.
     # RLock deixa a mesma thread travar de novo (uma função com a trava
-    # pode chamar outra que também usa a trava, sem travar o programa).
+    # pode chamar outra que também usa a trava, sem travar o programa)
     lock: threading.RLock = field(default_factory=threading.RLock)
 
     vizinhos: dict[ParReal, Vizinho] = field(default_factory=dict)
@@ -82,13 +82,13 @@ class Estado:
     prox_id: int = 1
     contadores: Contadores = field(default_factory=Contadores)
 
-    # Próximos disparos da thread temporizadora (time.monotonic()).
+    # Próximos disparos da thread temporizadora (time.monotonic())
     proximo_hello: float = 0.0
     proxima_renovacao: float = 0.0
 
-    # Opções de experimento (relatório, questões 4 e 5); desligadas por padrão.
+    # Opções de experimento (relatório, questões 4 e 5); desligadas por padrão
     descartar_lsp: int = 0                  # --descartar-lsp N: descarta o N-ésimo LSP novo
     lsps_novos_recebidos: int = 0           # contagem usada por --descartar-lsp
 
-    # Socket UDP único (envia e recebe); preenchido por roteador.py.
+    # Socket UDP único (envia e recebe); preenchido por roteador.py
     sock: Optional[object] = None

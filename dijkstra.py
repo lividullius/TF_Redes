@@ -36,7 +36,7 @@ def montar_grafo(lsdb: LSDBSimples) -> dict[str, dict[str, int]]:
     for origem, vizinhos in lsdb.items():
         grafo.setdefault(origem, {})
         for vizinho, custo in vizinhos.items():
-            # Aresta de mão única: "origem chega em vizinho com este custo".
+            # Aresta de mão única: "origem chega em vizinho com este custo"
             grafo[origem][vizinho] = custo
             grafo.setdefault(vizinho, {})
     return grafo
@@ -53,28 +53,28 @@ def calcular_tabela(
     grafo = montar_grafo(lsdb)
     grafo.setdefault(eu, {})
 
-    # Passo 2: no começo, só conhecemos a distância até nós mesmos (0).
+    # Passo 2: no começo, só conhecemos a distância até nós mesmos (0)
     distancia: dict[str, float] = {no: INFINITO for no in grafo}
     distancia[eu] = 0
     predecessor: dict[str, Optional[str]] = {no: None for no in grafo}
     primeiro_salto: dict[str, Optional[str]] = {no: None for no in grafo}
     finalizados: set[str] = set()
 
-    # Fila de prioridade: sempre devolve o nó com a menor distância.
+    # Fila de prioridade: sempre devolve o nó com a menor distância
     fila: list[tuple[float, str]] = [(0, eu)]
     iteracao = 0
 
     while fila:
-        # Passo 3: pega o nó mais próximo que ainda não foi finalizado.
+        # Passo 3: pega o nó mais próximo que ainda não foi finalizado
         dist_u, u = heapq.heappop(fila)
         # O mesmo nó pode estar na fila mais de uma vez; se já foi
-        # finalizado, essa entrada é antiga e é ignorada.
+        # finalizado, essa entrada é antiga e é ignorada
         if u in finalizados:
             continue
         finalizados.add(u)
         iteracao += 1
 
-        # Passo 4: para cada vizinho v de u, vê se passar por u é mais barato.
+        # Passo 4: para cada vizinho v de u, vê se passar por u é mais barato
         for v, custo in grafo[u].items():
             if v in finalizados:
                 continue
@@ -82,13 +82,13 @@ def calcular_tabela(
             if nova < distancia[v]:
                 distancia[v] = nova
                 predecessor[v] = u
-                # Primeiro salto = para qual vizinho nosso mandar o pacote.
-                # Se u somos nós, v é vizinho direto: o primeiro salto é o próprio v.
-                # Senão, o caminho até v passa por u, então usa o mesmo de u.
+                # Primeiro salto = para qual vizinho nosso mandar o pacote
+                # Se u somos nós, v é vizinho direto: o primeiro salto é o próprio v
+                # Senão, o caminho até v passa por u, então usa o mesmo de u
                 primeiro_salto[v] = v if u == eu else primeiro_salto[u]
                 heapq.heappush(fila, (nova, v))
 
-        # Usado pelo comando `dijkstra` para mostrar cada iteração.
+        # Usado pelo comando `dijkstra` para mostrar cada iteração
         if passo_a_passo is not None:
             passo_a_passo({
                 "iteracao": iteracao,
@@ -98,9 +98,9 @@ def calcular_tabela(
                 "predecessores": dict(predecessor),
             })
 
-    # Passo 5: monta a tabela com uma linha por roteador alcançável.
+    # Passo 5: monta a tabela com uma linha por roteador alcançável
     # A chave é a rede (ex.: 10.1.5), então qualquer endereço 10.1.5.x
-    # usa a rota do roteador 10.1.5.1.
+    # usa a rota do roteador 10.1.5.1
     minha_rede = rede_de(eu)
     tabela: dict[str, tuple[str, int]] = {}
     for no in finalizados:

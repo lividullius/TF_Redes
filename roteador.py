@@ -52,12 +52,12 @@ def analisar_argumentos(argv: list[str]) -> argparse.Namespace:
 def criar_socket(porta: int) -> socket.socket:
     """Cria o socket UDP único, ligado a ("0.0.0.0", porta)."""
     # Usamos um só socket para enviar e receber. Assim nossos pacotes saem
-    # pela porta configurada, e o vizinho sabe que fomos nós que enviamos.
+    # pela porta configurada, e o vizinho sabe que fomos nós que enviamos
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    # Correção para o Windows: sem isto, dá erro quando um vizinho está desligado.
+    # Correção para o Windows: sem isto, dá erro quando um vizinho está desligado
     if hasattr(socket, "SIO_UDP_CONNRESET"):
         sock.ioctl(socket.SIO_UDP_CONNRESET, False)
-    # 0.0.0.0 recebe pacotes de qualquer máquina da rede.
+    # 0.0.0.0 recebe pacotes de qualquer máquina da rede
     # (127.0.0.1 só receberia pacotes da própria máquina.)
     sock.bind(("0.0.0.0", porta))
     return sock
@@ -66,7 +66,7 @@ def criar_socket(porta: int) -> socket.socket:
 def thread_receptora(estado: Estado) -> None:
     """Laço de recvfrom. Nenhuma exceção encerra a thread em silêncio."""
     while True:
-        # Espera chegar um pacote. `origem` é o (ip, porta) de quem enviou.
+        # Espera chegar um pacote. `origem` é o (ip, porta) de quem enviou
         try:
             dados, origem = estado.sock.recvfrom(TAMANHO_MAX_DATAGRAMA)
         except ConnectionResetError:
@@ -78,7 +78,7 @@ def thread_receptora(estado: Estado) -> None:
             continue
 
         # Trata o pacote. Se der qualquer erro, registra no log e continua;
-        # sem isso a thread pararia e o roteador deixaria de receber pacotes.
+        # sem isso a thread pararia e o roteador deixaria de receber pacotes
         try:
             tratar_datagrama(estado, dados, (origem[0], origem[1]))
         except Exception as e:
@@ -90,12 +90,12 @@ def tratar_datagrama(estado: Estado, dados: bytes, origem_real: ParReal) -> None
     """Filtros: origem conhecida, ASCII estrito, número de campos (pacotes.analisar)."""
     par_txt = f"{origem_real[0]}:{origem_real[1]}"
 
-    # Filtro 1: só aceita pacotes de quem está no arquivo de configuração.
+    # Filtro 1: só aceita pacotes de quem está no arquivo de configuração
     if origem_real not in estado.vizinhos:
         log.evento(f"ORIGEM DESCONHECIDA {par_txt}: pacote descartado")
         return
 
-    # Filtro 2: o texto precisa estar no formato certo.
+    # Filtro 2: o texto precisa estar no formato certo
     try:
         pacote = pacotes.analisar(dados)
     except pacotes.PacoteMalformado as e:
@@ -107,7 +107,7 @@ def tratar_datagrama(estado: Estado, dados: bytes, origem_real: ParReal) -> None
 
 def despachar(estado: Estado, pacote: pacotes.Pacote, origem_real: ParReal) -> None:
     """Encaminha o pacote já analisado para o módulo responsável pelo tipo."""
-    # Cada tipo de pacote é tratado por um módulo diferente.
+    # Cada tipo de pacote é tratado por um módulo diferente
     if isinstance(pacote, pacotes.Hello):
         vizinhos.receber_hello(estado, pacote, origem_real)
     elif isinstance(pacote, pacotes.LSP):
@@ -120,11 +120,11 @@ def despachar(estado: Estado, pacote: pacotes.Pacote, origem_real: ParReal) -> N
 
 def thread_temporizadora(estado: Estado) -> None:
     """Acorda a cada 1 s e verifica os quatro temporizadores."""
-    # A cada 1 segundo, verifica se chegou a hora de alguma tarefa periódica.
-    # Cada função abaixo decide sozinha se precisa fazer algo agora.
+    # A cada 1 segundo, verifica se chegou a hora de alguma tarefa periódica
+    # Cada função abaixo decide sozinha se precisa fazer algo agora
     while True:
         # monotonic() é um relógio que só anda para frente; serve para medir
-        # intervalos (não muda se alguém ajustar a hora do computador).
+        # intervalos (não muda se alguém ajustar a hora do computador)
         agora = time.monotonic()
         try:
             vizinhos.enviar_hellos(estado, agora)         # a cada 5 s
@@ -139,28 +139,28 @@ def thread_temporizadora(estado: Estado) -> None:
 def main(argv: list[str]) -> int:
     args = analisar_argumentos(argv)
 
-    # 1. Lê o arquivo de configuração (encerra se tiver erro).
+    # 1. Lê o arquivo de configuração (encerra se tiver erro)
     try:
         cfg = config.carregar(args.config)
     except config.ErroConfiguracao as e:
         print(f"Erro na configuração: {e}", file=sys.stderr)
         return 1
 
-    # 2. Abre o socket na porta configurada.
+    # 2. Abre o socket na porta configurada
     try:
         sock = criar_socket(cfg.porta)
     except OSError as e:
         print(f"Não foi possível usar a porta UDP {cfg.porta}: {e}", file=sys.stderr)
         return 1
 
-    # 3. Prepara o log e o estado do roteador.
+    # 3. Prepara o log e o estado do roteador
     log.iniciar(cfg.endereco)
     estado = Estado(meu_endereco=cfg.endereco, porta=cfg.porta, sock=sock,
                     descartar_lsp=args.descartar_lsp)
     vizinhos.inicializar(estado, cfg.vizinhos)
 
     # O primeiro número de sequência vem do relógio. Se o roteador reiniciar,
-    # o número novo é maior que o antigo e os vizinhos aceitam os LSPs novos.
+    # o número novo é maior que o antigo e os vizinhos aceitam os LSPs novos
     seq_inicial = args.seq_inicial if args.seq_inicial is not None else int(time.time())
     estado.seq_proprio = seq_inicial - 1  # -1 porque gerar_lsp_proprio soma 1 antes de usar
 
@@ -169,13 +169,13 @@ def main(argv: list[str]) -> int:
     lsdb.gerar_lsp_proprio(estado, "início")
 
     # 4. Inicia as duas threads de fundo. daemon=True faz elas terminarem
-    #    junto com o programa quando o usuário digita "sair".
+    #    junto com o programa quando o usuário digita "sair"
     threading.Thread(target=thread_receptora, args=(estado,),
                      name="receptora", daemon=True).start()
     threading.Thread(target=thread_temporizadora, args=(estado,),
                      name="temporizadora", daemon=True).start()
 
-    # 5. A thread principal fica lendo os comandos do usuário.
+    # 5. A thread principal fica lendo os comandos do usuário
     try:
         cli.laco(estado)
     finally:
