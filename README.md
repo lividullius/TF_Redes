@@ -5,7 +5,7 @@ estado de enlace que roda sobre UDP. Cada roteador descobre os vizinhos com HELL
 espalha a topologia com LSPs, calcula as rotas com Dijkstra e encaminha mensagens
 (DADOS) e pings (ICMP).
 
-Feito em Python 3.9 ou mais novo, só com a biblioteca padrão (não precisa instalar nada).
+Feito em Python 3.9 ou mais novo, só com a biblioteca padrão.
 
 ## Como executar
 
@@ -257,7 +257,6 @@ dijkstra.py        cálculo da tabela de roteamento
 encaminhamento.py  entrega, encaminhamento com TTL e mensagens ICMP
 cli.py             comandos digitados pelo usuário
 log.py             log no terminal e em arquivo
-
 configs/           arquivos de configuração (teste5, dois_pcs, apresentacao4)
 tests/             testes unitários
 scripts/           scripts de apoio aos testes
