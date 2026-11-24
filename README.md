@@ -9,11 +9,25 @@ Feito em Python 3.9 ou mais novo, só com a biblioteca padrão (não precisa ins
 
 ## Como executar
 
+### Pré-requisitos
+
+- Python 3.9 ou mais novo (`python3 --version`; no Windows, `python --version` ou `py --version`).
+- Nada para instalar: só a biblioteca padrão.
+- O repositório clonado:
+
+```sh
+git clone https://github.com/lividullius/TF_Redes.git
+cd TF_Redes
+```
+
+### Uso
+
 ```sh
 python3 roteador.py <arquivo.conf> [--seq-inicial N] [--descartar-lsp N]
 ```
 
 Cada roteador roda em um terminal próprio. Para encerrar, digite `sair` (ou Ctrl+D).
+No Windows, troque `python3` por `python` ou `py`.
 
 ### Em uma máquina só (5 roteadores)
 
@@ -31,12 +45,100 @@ No macOS, `sh scripts/iniciar_teste5.sh` abre os 5 terminais de uma vez.
 
 ### Em dois PCs na mesma rede
 
-Veja o passo a passo em [COMO_RODAR.md](COMO_RODAR.md) (configs em [configs/dois_pcs/](configs/dois_pcs/)).
+Usa os arquivos de [configs/dois_pcs/](configs/dois_pcs/).
+
+**1. Conectar os dois PCs na mesma rede.** Os dois precisam estar **no mesmo Wi-Fi**
+(access point, roteador de casa ou celular como ponto de acesso). Evite a rede da
+universidade: ela costuma bloquear tráfego entre aparelhos.
+
+**2. Descobrir o IP real de cada PC.**
+
+| Sistema | Comando |
+|---|---|
+| macOS | `ipconfig getifaddr en0` |
+| Windows | `ipconfig` (linha "Endereço IPv4" do adaptador Wi-Fi) |
+| Linux | `hostname -I` |
+
+Anote os dois IPs (ex.: PC 1 = `192.168.0.11`, PC 2 = `192.168.0.12`).
+O IP pode mudar cada vez que o PC conecta (DHCP), então confira de novo a cada teste.
+
+**3. Editar a configuração.** Cada PC coloca no seu arquivo o **IP do outro PC**:
+
+- PC 1 edita [configs/dois_pcs/pc1.conf](configs/dois_pcs/pc1.conf): na linha `vizinho`, o IP do **PC 2**.
+- PC 2 edita [configs/dois_pcs/pc2.conf](configs/dois_pcs/pc2.conf): na linha `vizinho`, o IP do **PC 1**.
+
+```
+endereco 10.1.1.1             # endereço virtual deste roteador (10.G.R.1)
+porta 6000                    # porta UDP local
+vizinho 192.168.0.12 6000 1   # <IP real do outro PC> <porta dele> <custo>
+```
+
+O custo tem que ser o mesmo nos dois arquivos.
+
+**4. Liberar a porta UDP 6000 no firewall.**
+
+- **macOS:** na primeira execução pode aparecer "Deseja que python3 aceite conexões de
+  entrada?". Clique em **Permitir**. Se o firewall estiver ativo e não perguntar, veja em
+  Ajustes do Sistema → Rede → Firewall → Opções.
+- **Windows** (PowerShell como administrador):
+
+  ```
+  netsh advfirewall firewall add rule name="TF Redes UDP 6000" dir=in action=allow protocol=UDP localport=6000
+  ```
+
+  Ou aceite o aviso do Windows Defender na primeira execução, marcando **redes privadas e públicas**.
+- **Linux:** `sudo ufw allow 6000/udp` (se o ufw estiver ativo).
+
+**5. Rodar.**
+
+```sh
+# PC 1
+python3 roteador.py configs/dois_pcs/pc1.conf
+
+# PC 2
+python3 roteador.py configs/dois_pcs/pc2.conf
+```
+
+Em até 5 s cada lado deve mostrar `VIZINHO ATIVO`.
+
+**6. Conferir que funcionou.** No terminal do PC 1, digite:
+
+```
+vizinhos              # deve listar 10.1.2.1 com o IP do PC 2
+lsdb                  # LSPs de 10.1.1.1 e 10.1.2.1
+tabela                # rota para 10.1.2.0/24
+ping 10.1.2.1         # resposta de eco de 10.1.2.1 com o RTT
+msg 10.1.2.1 oi       # aparece "MENSAGEM RECEBIDA" no PC 2
+```
+
+Para testar a detecção de queda, digite `sair` no PC 2. Uns 15 a 20 s depois o PC 1 mostra
+`VIZINHO INATIVO`, e a rota some da `tabela`.
 
 ### Na apresentação (4 PCs)
 
-Use [configs/apresentacao4/](configs/apresentacao4/). Antes, troque `127.0.0.1` pelo IP real
-de cada PC e as portas por 6000, e libere a porta UDP 6000 no firewall.
+Use [configs/apresentacao4/](configs/apresentacao4/) (R1 a R4, um por PC). Os passos são os
+mesmos de [dois PCs](#em-dois-pcs-na-mesma-rede): mesma rede, troque `127.0.0.1` pelo IP real
+de cada PC vizinho, troque as portas (`porta` e as dos `vizinho`) por 6000 e libere a porta
+UDP 6000 no firewall.
+
+| Enlace | Custo |
+|---|---|
+| R1 – R2 | 1 |
+| R2 – R3 | 2 |
+| R3 – R4 | 3 |
+| R4 – R1 | 7 |
+
+Sem mudar nada, os 4 arquivos também rodam em uma máquina só (portas 6001 a 6004).
+
+### Problemas comuns
+
+| Sintoma | Causa provável |
+|---|---|
+| Log mostra `ORIGEM DESCONHECIDA 192.168.x.y:6000` | O IP na linha `vizinho` está errado. Use exatamente o IP:porta que aparece nesse log. |
+| Nenhum `VIZINHO ATIVO` e nenhum log de origem desconhecida | Os pacotes não estão chegando: firewall bloqueando, PCs em redes diferentes, ou a rede isola os aparelhos (troque para o hotspot do celular). |
+| Só um lado fica ativo | O firewall de um dos PCs está bloqueando a entrada. |
+| `Não foi possível usar a porta UDP 6000` | Outro roteador já está rodando nesse PC. Feche-o ou mude a `porta` (e avise quem tem você como vizinho). |
+| `Erro na configuração: ...` | A mensagem diz a linha com problema (IP inválido, custo não positivo etc.). |
 
 ## Comandos
 
@@ -71,8 +173,15 @@ vizinho 127.0.0.1 6002 1   # vizinho <ip real> <porta> <custo>
 vizinho 127.0.0.1 6003 4
 ```
 
+| Diretiva | Obrigatória | Regras |
+|---|---|---|
+| `endereco 10.G.R.1` | sim, uma vez | Primeiro octeto 10 e último 1 |
+| `porta <n>` | não (padrão 6000) | Entre 1 e 65535, no máximo uma vez |
+| `vizinho <ip> <porta> <custo>` | não, uma linha por vizinho | Sem repetir o mesmo IP e porta |
+
 - O custo é um inteiro positivo, e os dois lados de um enlace devem usar o mesmo custo.
 - O IP do vizinho precisa ser numérico (não use `localhost`).
+- Diretiva desconhecida ou com argumentos a mais ou a menos é erro.
 - Se houver erro no arquivo, o roteador mostra a linha com problema e não inicia.
 
 ## Formato dos pacotes
